@@ -4,24 +4,47 @@
  * 使用: node examples/createPoolWithTokenAndSol.js
  */
 
-const { Connection, Keypair, PublicKey, sendAndConfirmTransaction } = require("@solana/web3.js");
-const { BN } = require("@coral-xyz/anchor");
-const { CpAmm, derivePoolAddress, derivePositionAddress, getSqrtPriceFromPrice } = require("../dist");
-const { getMint, NATIVE_MINT, TOKEN_2022_PROGRAM_ID, TOKEN_PROGRAM_ID } = require("@solana/spl-token");
+import { Connection, Keypair, PublicKey, sendAndConfirmTransaction } from "@solana/web3.js";
+import { BN } from "@coral-xyz/anchor";
+import { CpAmm, derivePoolAddress, derivePositionAddress, getSqrtPriceFromPrice } from "../dist/index.js";
+import { getMint, NATIVE_MINT, TOKEN_2022_PROGRAM_ID, TOKEN_PROGRAM_ID } from "@solana/spl-token";
+
+/**
+ * 获取第一个可用的配置地址
+ */
+export async function getDefaultConfig(rpcUrl) {
+  const connection = new Connection(rpcUrl);
+  const cpAmm = new CpAmm(connection);
+  const configs = await cpAmm.getAllConfigs();
+
+  if (configs.length === 0) {
+    throw new Error("No config found");
+  }
+
+  console.log(`Found ${configs.length} configs, using first one`);
+  return configs[0].publicKey.toBase58();
+}
+
+/**
+ * 获取所有配置地址
+ */
+export async function getAllConfigs(rpcUrl) {
+  const connection = new Connection(rpcUrl);
+  const cpAmm = new CpAmm(connection);
+  const configs = await cpAmm.getAllConfigs();
+
+  return configs.map((c, i) => ({
+    index: i,
+    address: c.publicKey.toBase58(),
+    sqrtMinPrice: c.account.sqrtMinPrice.toString(),
+    sqrtMaxPrice: c.account.sqrtMaxPrice.toString(),
+  }));
+}
 
 /**
  * 创建 Token + SOL 流动性池
- *
- * @param {string} rpcUrl - RPC 地址
- * @param {Keypair} wallet - 钱包 Keypair
- * @param {string} tokenMint - Token mint 地址
- * @param {string} configAddress - 配置地址
- * @param {number} tokenAmount - Token 数量 (不含精度)
- * @param {number} solAmount - SOL 数量
- * @param {number} tokenDecimals - Token 精度，默认 9
- * @param {boolean} lockLiquidity - 是否锁定流动性，默认 false
  */
-async function createTokenSolPool(
+export async function createTokenSolPool(
   rpcUrl,
   wallet,
   tokenMint,
@@ -121,36 +144,4 @@ async function createTokenSolPool(
     positionNftKeypair: positionNft,
     signature,
   };
-}
-
-module.exports = { createTokenSolPool };
-
-// ============================================
-// 使用示例
-// ============================================
-async function main() {
-  const wallet = Keypair.fromSecretKey(
-    Uint8Array.from(require("~/.config/solana/id.json"))
-  );
-
-  const result = await createTokenSolPool(
-    "https://api.devnet.solana.com",     // RPC
-    wallet,                               // 钱包
-    "YOUR_TOKEN_MINT_ADDRESS",            // Token 地址
-    "8CNy9goNQNLM4wtgRw528tUQGMKD3vSuFRZY2gLGLLvF",  // Devnet config
-    1_000_000,                            // Token 数量
-    1,                                    // SOL 数量
-    9,                                    // Token 精度
-    false                                 // 不锁定
-  );
-
-  console.log("Result:", result);
-
-  // 保存私钥用于后续取出流动性
-  console.log("\nPosition NFT 私钥 (请保存):");
-  console.log(JSON.stringify(Array.from(result.positionNftKeypair.secretKey)));
-}
-
-if (require.main === module) {
-  main().catch(console.error);
 }
