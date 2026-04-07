@@ -6,11 +6,10 @@
  *   const { getSolPriceUsd, getTokenPriceUsd } = require("@meteora-ag/cp-amm-sdk");
  *
  *   const connection = new Connection("https://api.mainnet-beta.solana.com");
- *   const solUsdcPoolAddress  = new PublicKey("SOL/USDC 池地址");
  *   const tokenSolPoolAddress = new PublicKey("token/SOL 池地址");
  *
- *   // 1. 获取 SOL 价格（10 分钟缓存，首次调用时自动拉取）
- *   const solPrice = await getSolPriceUsd(connection, solUsdcPoolAddress);
+ *   // 1. 获取 SOL 价格（10 分钟缓存，从 Jupiter Price API 拉取）
+ *   const solPrice = await getSolPriceUsd();
  *   console.log(`SOL 价格：$${solPrice.toFixed(2)}`);
  *
  *   // 2. 获取 token 的 USD 价格（token 精度为 6）
@@ -27,8 +26,10 @@ const Decimal = require("decimal.js");
 
 // SOL 精度
 const SOL_DECIMAL = 9;
-// USDC 精度
-const USDC_DECIMAL = 6;
+// Jupiter Price API 中 SOL 的 mint 地址
+const SOL_MINT = "So11111111111111111111111111111111111111112";
+// Jupiter Price API 地址
+const JUPITER_PRICE_API = `https://api.jup.ag/price/v2?ids=${SOL_MINT}`;
 // SOL 价格缓存有效期：10 分钟
 const SOL_PRICE_CACHE_TTL_MS = 10 * 60 * 1000;
 
@@ -37,34 +38,24 @@ let cachedSolPrice = null;
 let lastFetchedAt = 0;
 
 /**
- * 获取 SOL 的 USD 价格，10 分钟内只请求一次链上数据。
- * 自动判断池子中 SOL 是 tokenA 还是 tokenB。
+ * 从 Jupiter Price API 获取 SOL 的 USD 价格，10 分钟内只请求一次。
  *
- * @param {Connection} connection         - Solana Connection 实例
- * @param {PublicKey}  solUsdcPoolAddress - SOL/USDC 池地址
  * @returns {Promise<Decimal>} SOL 的 USD 价格
  */
-async function getSolPriceUsd(connection, solUsdcPoolAddress) {
+async function getSolPriceUsd() {
   const now = Date.now();
   // 缓存未过期时直接返回
   if (cachedSolPrice !== null && now - lastFetchedAt < SOL_PRICE_CACHE_TTL_MS) {
     return cachedSolPrice;
   }
 
-  const cpAmm = new CpAmm(connection);
-  const pool = await cpAmm._program.account.pool.fetch(solUsdcPoolAddress);
-  const solIsTokenA = pool.tokenAMint.equals(NATIVE_MINT);
+  // 从 Jupiter Price API 拉取 SOL 价格
+  const res = await fetch(JUPITER_PRICE_API);
+  const json = await res.json();
+  const price = json?.data?.[SOL_MINT]?.price;
+  if (!price) throw new Error("无法从 Jupiter Price API 获取 SOL 价格");
 
-  // tokenA=SOL, tokenB=USDC → getPriceFromSqrtPrice 返回 USDC/SOL，即 SOL 的 USD 价格 ✓
-  // tokenA=USDC, tokenB=SOL → getPriceFromSqrtPrice 返回 SOL/USDC，取倒数得 USDC/SOL
-  if (solIsTokenA) {
-    cachedSolPrice = getPriceFromSqrtPrice(new BN(pool.sqrtPrice), SOL_DECIMAL, USDC_DECIMAL);
-  } else {
-    cachedSolPrice = new Decimal(1).div(
-      getPriceFromSqrtPrice(new BN(pool.sqrtPrice), USDC_DECIMAL, SOL_DECIMAL)
-    );
-  }
-
+  cachedSolPrice = new Decimal(price);
   lastFetchedAt = now;
   return cachedSolPrice;
 }
