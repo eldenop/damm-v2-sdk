@@ -229,6 +229,64 @@ export const calculateTokenPriceInUsd = (
   return tokenPriceInSol.mul(solPriceInUsd);
 };
 
+const SOL_PRICE_CACHE_TTL_MS = 10 * 60 * 1000; // 10 minutes
+
+/**
+ * Creates a cached SOL price fetcher that refreshes at most once every 10 minutes.
+ *
+ * Usage:
+ *   const getSolPrice = createSolPriceCache(async () => {
+ *     const pool = await cpAmm.program.account.pool.fetch(solUsdcPoolAddress);
+ *     return getPriceFromSqrtPrice(pool.sqrtPrice, SOL_DECIMAL, USDC_DECIMAL);
+ *   });
+ *
+ *   const solPrice = await getSolPrice(); // fetches on first call, then uses cache for 10 min
+ *
+ * @param fetcher - async function that returns the current SOL price in USD
+ * @returns a function that returns a cached Decimal price
+ */
+export const createSolPriceCache = (
+  fetcher: () => Promise<Decimal>
+): (() => Promise<Decimal>) => {
+  let cachedPrice: Decimal | null = null;
+  let lastFetchedAt = 0;
+
+  return async (): Promise<Decimal> => {
+    const now = Date.now();
+    if (cachedPrice === null || now - lastFetchedAt >= SOL_PRICE_CACHE_TTL_MS) {
+      cachedPrice = await fetcher();
+      lastFetchedAt = now;
+    }
+    return cachedPrice;
+  };
+};
+
+/**
+ * Calculates token price in USD using a cached SOL price.
+ *
+ * @param tokenSolPoolSqrtPrice - sqrtPrice of the token/SOL pool (tokenA = yourToken, tokenB = SOL)
+ * @param tokenDecimal          - decimal places of your token
+ * @param solDecimal            - decimal places of SOL (usually 9)
+ * @param getCachedSolPrice     - cached SOL price getter created by createSolPriceCache()
+ * @returns token price in USD as a Decimal
+ */
+export const calculateTokenPriceInUsdCached = async (
+  tokenSolPoolSqrtPrice: BN,
+  tokenDecimal: number,
+  solDecimal: number,
+  getCachedSolPrice: () => Promise<Decimal>
+): Promise<Decimal> => {
+  const tokenPriceInSol = getPriceFromSqrtPrice(
+    tokenSolPoolSqrtPrice,
+    tokenDecimal,
+    solDecimal
+  );
+
+  const solPriceInUsd = await getCachedSolPrice();
+
+  return tokenPriceInSol.mul(solPriceInUsd);
+};
+
 // fee = totalLiquidity * feePerTokenStore
 // precision: (totalLiquidity * feePerTokenStore) >> 128
 /**
