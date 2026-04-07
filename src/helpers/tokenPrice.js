@@ -14,13 +14,16 @@
  *   console.log(`SOL 价格：$${solPrice.toFixed(2)}`);
  *
  *   // 2. 获取 token 的 USD 价格（token 精度为 6）
+ *   //    tokenA/tokenB 顺序无所谓，函数内部自动判断哪个是 SOL
  *   const tokenPrice = await getTokenPriceUsd(connection, tokenSolPoolAddress, 6, solPrice);
  *   console.log(`Token 价格：$${tokenPrice.toFixed(6)}`);
  */
 
 const { BN } = require("@coral-xyz/anchor");
+const { NATIVE_MINT } = require("@solana/spl-token");
 const { CpAmm } = require("../CpAmm");
 const { getPriceFromSqrtPrice } = require("./utils");
+const Decimal = require("decimal.js");
 
 // SOL 精度
 const SOL_DECIMAL = 9;
@@ -35,9 +38,10 @@ let lastFetchedAt = 0;
 
 /**
  * 获取 SOL 的 USD 价格，10 分钟内只请求一次链上数据。
+ * 自动判断池子中 SOL 是 tokenA 还是 tokenB。
  *
- * @param {Connection} connection        - Solana Connection 实例
- * @param {PublicKey}  solUsdcPoolAddress - SOL/USDC 池地址（tokenA = SOL，tokenB = USDC）
+ * @param {Connection} connection         - Solana Connection 实例
+ * @param {PublicKey}  solUsdcPoolAddress - SOL/USDC 池地址
  * @returns {Promise<Decimal>} SOL 的 USD 价格
  */
 async function getSolPriceUsd(connection, solUsdcPoolAddress) {
@@ -46,19 +50,31 @@ async function getSolPriceUsd(connection, solUsdcPoolAddress) {
   if (cachedSolPrice !== null && now - lastFetchedAt < SOL_PRICE_CACHE_TTL_MS) {
     return cachedSolPrice;
   }
-  // 用 connection 构造 CpAmm，拉取链上数据并更新缓存
+
   const cpAmm = new CpAmm(connection);
   const pool = await cpAmm._program.account.pool.fetch(solUsdcPoolAddress);
-  cachedSolPrice = getPriceFromSqrtPrice(new BN(pool.sqrtPrice), SOL_DECIMAL, USDC_DECIMAL);
+  const solIsTokenA = pool.tokenAMint.equals(NATIVE_MINT);
+
+  // tokenA=SOL, tokenB=USDC → getPriceFromSqrtPrice 返回 USDC/SOL，即 SOL 的 USD 价格 ✓
+  // tokenA=USDC, tokenB=SOL → getPriceFromSqrtPrice 返回 SOL/USDC，取倒数得 USDC/SOL
+  if (solIsTokenA) {
+    cachedSolPrice = getPriceFromSqrtPrice(new BN(pool.sqrtPrice), SOL_DECIMAL, USDC_DECIMAL);
+  } else {
+    cachedSolPrice = new Decimal(1).div(
+      getPriceFromSqrtPrice(new BN(pool.sqrtPrice), USDC_DECIMAL, SOL_DECIMAL)
+    );
+  }
+
   lastFetchedAt = now;
   return cachedSolPrice;
 }
 
 /**
  * 获取 token 的 USD 价格。
+ * 自动判断池子中 SOL 是 tokenA 还是 tokenB。
  *
  * @param {Connection} connection          - Solana Connection 实例
- * @param {PublicKey}  tokenSolPoolAddress - token/SOL 池地址（tokenA = 目标token，tokenB = SOL）
+ * @param {PublicKey}  tokenSolPoolAddress - token/SOL 池地址（顺序任意）
  * @param {number}     tokenDecimal        - 目标 token 的精度
  * @param {Decimal}    solPriceUsd         - SOL 的 USD 价格（由 getSolPriceUsd() 获取）
  * @returns {Promise<Decimal>} token 的 USD 价格
@@ -66,8 +82,19 @@ async function getSolPriceUsd(connection, solUsdcPoolAddress) {
 async function getTokenPriceUsd(connection, tokenSolPoolAddress, tokenDecimal, solPriceUsd) {
   const cpAmm = new CpAmm(connection);
   const pool = await cpAmm._program.account.pool.fetch(tokenSolPoolAddress);
-  // token 以 SOL 计价的价格，再乘以 SOL/USD 得到 token 的 USD 价格
-  const tokenPriceInSol = getPriceFromSqrtPrice(new BN(pool.sqrtPrice), tokenDecimal, SOL_DECIMAL);
+  const solIsTokenA = pool.tokenAMint.equals(NATIVE_MINT);
+
+  let tokenPriceInSol;
+  // tokenA=SOL, tokenB=token → getPriceFromSqrtPrice 返回 token/SOL，取倒数得 SOL/token
+  // tokenA=token, tokenB=SOL → getPriceFromSqrtPrice 返回 SOL/token ✓
+  if (solIsTokenA) {
+    tokenPriceInSol = new Decimal(1).div(
+      getPriceFromSqrtPrice(new BN(pool.sqrtPrice), SOL_DECIMAL, tokenDecimal)
+    );
+  } else {
+    tokenPriceInSol = getPriceFromSqrtPrice(new BN(pool.sqrtPrice), tokenDecimal, SOL_DECIMAL);
+  }
+
   return tokenPriceInSol.mul(solPriceUsd);
 }
 
