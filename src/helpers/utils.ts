@@ -188,21 +188,21 @@ export const getSqrtPriceFromPrice = (
 };
 
 /**
- * Calculates the token price in USD using a SOL/token pool and a SOL/USDC pool.
+ * 根据 token/SOL 池和 SOL/USDC 池计算 token 的 USD 价格。
  *
- * Flow:
+ * 计算流程：
  *   1. tokenPriceInSOL  = getPriceFromSqrtPrice(tokenSolPool.sqrtPrice, tokenDecimal, SOL_DECIMAL)
- *      → how many SOL per 1 token  (tokenB / tokenA)
+ *      → 每个 token 对应多少 SOL（tokenB / tokenA）
  *   2. solPriceInUSD    = getPriceFromSqrtPrice(solUsdcPool.sqrtPrice, SOL_DECIMAL, USDC_DECIMAL)
- *      → how many USDC per 1 SOL
+ *      → 每个 SOL 对应多少 USDC
  *   3. tokenPriceInUSD  = tokenPriceInSOL × solPriceInUSD
  *
- * @param tokenSolPoolSqrtPrice  - sqrtPrice of the token/SOL pool (tokenA = yourToken, tokenB = SOL)
- * @param tokenDecimal           - decimal places of your token
- * @param solDecimal             - decimal places of SOL (usually 9)
- * @param solUsdcPoolSqrtPrice   - sqrtPrice of the SOL/USDC pool (tokenA = SOL, tokenB = USDC)
- * @param usdcDecimal            - decimal places of USDC (usually 6)
- * @returns token price in USD as a Decimal
+ * @param tokenSolPoolSqrtPrice  - token/SOL 池的 sqrtPrice（tokenA = 目标token，tokenB = SOL）
+ * @param tokenDecimal           - 目标 token 的精度
+ * @param solDecimal             - SOL 的精度（通常为 9）
+ * @param solUsdcPoolSqrtPrice   - SOL/USDC 池的 sqrtPrice（tokenA = SOL，tokenB = USDC）
+ * @param usdcDecimal            - USDC 的精度（通常为 6）
+ * @returns token 的 USD 价格（Decimal 类型）
  */
 export const calculateTokenPriceInUsd = (
   tokenSolPoolSqrtPrice: BN,
@@ -211,39 +211,40 @@ export const calculateTokenPriceInUsd = (
   solUsdcPoolSqrtPrice: BN,
   usdcDecimal: number
 ): Decimal => {
-  // Step 1: token price in SOL (SOL per token)
+  // 第一步：从 token/SOL 池获取 token 以 SOL 计价的价格
   const tokenPriceInSol = getPriceFromSqrtPrice(
     tokenSolPoolSqrtPrice,
     tokenDecimal,
     solDecimal
   );
 
-  // Step 2: SOL price in USDC (USDC per SOL)
+  // 第二步：从 SOL/USDC 池获取 SOL 以 USDC 计价的价格
   const solPriceInUsd = getPriceFromSqrtPrice(
     solUsdcPoolSqrtPrice,
     solDecimal,
     usdcDecimal
   );
 
-  // Step 3: token price in USD
+  // 第三步：相乘得到 token 的 USD 价格
   return tokenPriceInSol.mul(solPriceInUsd);
 };
 
-const SOL_PRICE_CACHE_TTL_MS = 10 * 60 * 1000; // 10 minutes
+// SOL 价格缓存有效期：10 分钟
+const SOL_PRICE_CACHE_TTL_MS = 10 * 60 * 1000;
 
 /**
- * Creates a cached SOL price fetcher that refreshes at most once every 10 minutes.
+ * 创建一个带缓存的 SOL 价格获取器，最多每 10 分钟刷新一次链上数据。
  *
- * Usage:
+ * 使用示例：
  *   const getSolPrice = createSolPriceCache(async () => {
  *     const pool = await cpAmm.program.account.pool.fetch(solUsdcPoolAddress);
  *     return getPriceFromSqrtPrice(pool.sqrtPrice, SOL_DECIMAL, USDC_DECIMAL);
  *   });
  *
- *   const solPrice = await getSolPrice(); // fetches on first call, then uses cache for 10 min
+ *   const solPrice = await getSolPrice(); // 首次调用时拉取链上数据，10 分钟内直接返回缓存
  *
- * @param fetcher - async function that returns the current SOL price in USD
- * @returns a function that returns a cached Decimal price
+ * @param fetcher - 返回当前 SOL/USD 价格的异步函数（由调用方提供，可换成任意数据源）
+ * @returns 带缓存的价格获取函数
  */
 export const createSolPriceCache = (
   fetcher: () => Promise<Decimal>
@@ -253,6 +254,7 @@ export const createSolPriceCache = (
 
   return async (): Promise<Decimal> => {
     const now = Date.now();
+    // 缓存为空或已超过 TTL 时重新拉取
     if (cachedPrice === null || now - lastFetchedAt >= SOL_PRICE_CACHE_TTL_MS) {
       cachedPrice = await fetcher();
       lastFetchedAt = now;
@@ -262,13 +264,13 @@ export const createSolPriceCache = (
 };
 
 /**
- * Calculates token price in USD using a cached SOL price.
+ * 使用缓存的 SOL 价格计算 token 的 USD 价格。
  *
- * @param tokenSolPoolSqrtPrice - sqrtPrice of the token/SOL pool (tokenA = yourToken, tokenB = SOL)
- * @param tokenDecimal          - decimal places of your token
- * @param solDecimal            - decimal places of SOL (usually 9)
- * @param getCachedSolPrice     - cached SOL price getter created by createSolPriceCache()
- * @returns token price in USD as a Decimal
+ * @param tokenSolPoolSqrtPrice - token/SOL 池的 sqrtPrice（tokenA = 目标token，tokenB = SOL）
+ * @param tokenDecimal          - 目标 token 的精度
+ * @param solDecimal            - SOL 的精度（通常为 9）
+ * @param getCachedSolPrice     - 由 createSolPriceCache() 创建的缓存获取函数
+ * @returns token 的 USD 价格（Decimal 类型）
  */
 export const calculateTokenPriceInUsdCached = async (
   tokenSolPoolSqrtPrice: BN,
@@ -276,14 +278,17 @@ export const calculateTokenPriceInUsdCached = async (
   solDecimal: number,
   getCachedSolPrice: () => Promise<Decimal>
 ): Promise<Decimal> => {
+  // 从 token/SOL 池计算 token 以 SOL 计价的价格
   const tokenPriceInSol = getPriceFromSqrtPrice(
     tokenSolPoolSqrtPrice,
     tokenDecimal,
     solDecimal
   );
 
+  // 从缓存中获取 SOL 的 USD 价格
   const solPriceInUsd = await getCachedSolPrice();
 
+  // 相乘得到 token 的 USD 价格
   return tokenPriceInSol.mul(solPriceInUsd);
 };
 
