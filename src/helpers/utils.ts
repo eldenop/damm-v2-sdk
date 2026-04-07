@@ -187,6 +187,48 @@ export const getSqrtPriceFromPrice = (
   return new BN(sqrtValueQ64.floor().toFixed());
 };
 
+/**
+ * Calculates the token price in USD using a SOL/token pool and a SOL/USDC pool.
+ *
+ * Flow:
+ *   1. tokenPriceInSOL  = getPriceFromSqrtPrice(tokenSolPool.sqrtPrice, tokenDecimal, SOL_DECIMAL)
+ *      → how many SOL per 1 token  (tokenB / tokenA)
+ *   2. solPriceInUSD    = getPriceFromSqrtPrice(solUsdcPool.sqrtPrice, SOL_DECIMAL, USDC_DECIMAL)
+ *      → how many USDC per 1 SOL
+ *   3. tokenPriceInUSD  = tokenPriceInSOL × solPriceInUSD
+ *
+ * @param tokenSolPoolSqrtPrice  - sqrtPrice of the token/SOL pool (tokenA = yourToken, tokenB = SOL)
+ * @param tokenDecimal           - decimal places of your token
+ * @param solDecimal             - decimal places of SOL (usually 9)
+ * @param solUsdcPoolSqrtPrice   - sqrtPrice of the SOL/USDC pool (tokenA = SOL, tokenB = USDC)
+ * @param usdcDecimal            - decimal places of USDC (usually 6)
+ * @returns token price in USD as a Decimal
+ */
+export const calculateTokenPriceInUsd = (
+  tokenSolPoolSqrtPrice: BN,
+  tokenDecimal: number,
+  solDecimal: number,
+  solUsdcPoolSqrtPrice: BN,
+  usdcDecimal: number
+): Decimal => {
+  // Step 1: token price in SOL (SOL per token)
+  const tokenPriceInSol = getPriceFromSqrtPrice(
+    tokenSolPoolSqrtPrice,
+    tokenDecimal,
+    solDecimal
+  );
+
+  // Step 2: SOL price in USDC (USDC per SOL)
+  const solPriceInUsd = getPriceFromSqrtPrice(
+    solUsdcPoolSqrtPrice,
+    solDecimal,
+    usdcDecimal
+  );
+
+  // Step 3: token price in USD
+  return tokenPriceInSol.mul(solPriceInUsd);
+};
+
 // fee = totalLiquidity * feePerTokenStore
 // precision: (totalLiquidity * feePerTokenStore) >> 128
 /**
