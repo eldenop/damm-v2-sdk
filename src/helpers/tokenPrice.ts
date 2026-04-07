@@ -23,7 +23,7 @@ const USDC_DECIMAL = 6;
 // SOL 价格缓存有效期：10 分钟
 const SOL_PRICE_CACHE_TTL_MS = 10 * 60 * 1000;
 
-// 模块内缓存
+// 模块级缓存变量，JS 模块只加载一次，进程运行期间始终有效，不会因函数调用而重置
 let cachedSolPrice: Decimal | null = null;
 let lastFetchedAt = 0;
 
@@ -34,10 +34,10 @@ let lastFetchedAt = 0;
  * @param solUsdcPoolAddress - SOL/USDC 池地址（tokenA = SOL，tokenB = USDC）
  * @returns SOL 的 USD 价格
  */
-export const getSolPriceUsd = async (
+export async function getSolPriceUsd(
   program: AmmProgram,
   solUsdcPoolAddress: PublicKey
-): Promise<Decimal> => {
+): Promise<Decimal> {
   const now = Date.now();
   // 缓存未过期时直接返回
   if (cachedSolPrice !== null && now - lastFetchedAt < SOL_PRICE_CACHE_TTL_MS) {
@@ -48,7 +48,7 @@ export const getSolPriceUsd = async (
   cachedSolPrice = getPriceFromSqrtPrice(new BN(pool.sqrtPrice), SOL_DECIMAL, USDC_DECIMAL);
   lastFetchedAt = now;
   return cachedSolPrice;
-};
+}
 
 /**
  * 获取 token 的 USD 价格。
@@ -59,14 +59,14 @@ export const getSolPriceUsd = async (
  * @param solPriceUsd         - SOL 的 USD 价格（由 getSolPriceUsd() 获取）
  * @returns token 的 USD 价格
  */
-export const getTokenPriceUsd = async (
+export async function getTokenPriceUsd(
   program: AmmProgram,
   tokenSolPoolAddress: PublicKey,
   tokenDecimal: number,
   solPriceUsd: Decimal
-): Promise<Decimal> => {
+): Promise<Decimal> {
   const pool = await program.account.pool.fetch(tokenSolPoolAddress);
   // token 以 SOL 计价的价格，再乘以 SOL/USD 得到 token 的 USD 价格
   const tokenPriceInSol = getPriceFromSqrtPrice(new BN(pool.sqrtPrice), tokenDecimal, SOL_DECIMAL);
   return tokenPriceInSol.mul(solPriceUsd);
-};
+}
