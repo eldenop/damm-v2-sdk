@@ -1,6 +1,7 @@
 export * from "./token";
 export * from "./computeUnits";
 export * from "./utils";
+export * from "./tokenPrice";
 export * from "./accountFilters";
 export * from "./token2022";
 export * from "./vestings";
