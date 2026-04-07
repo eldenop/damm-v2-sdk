@@ -22,7 +22,7 @@ const { BN } = require("@coral-xyz/anchor");
 const { NATIVE_MINT } = require("@solana/spl-token");
 const { CpAmm } = require("../CpAmm");
 const { getPriceFromSqrtPrice } = require("./utils");
-const Decimal = require("decimal.js");
+const Decimal = require("decimal.js").default;
 
 // SOL 精度
 const SOL_DECIMAL = 9;
